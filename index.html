@@ -267,6 +267,63 @@ function LoginModal({ onLogin, onCancel }) {
   );
 }
 
+/* ---------- Reset confirmation modal (password required) ---------- */
+function ResetConfirmModal({ onConfirm, onCancel }) {
+  const [pwd, setPwd] = useState("");
+  const [show, setShow] = useState(false);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const tryConfirm = async () => {
+    if (!pwd) return;
+    setBusy(true); setError("");
+    const h = await sha256Hex(pwd);
+    if (h === CONFIG.PASSWORD_HASH) {
+      onConfirm();
+    } else {
+      setError("Incorrect password.");
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
+      <Card className="w-full max-w-sm shadow-xl">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-lg">
+            <RotateCcw className="h-5 w-5" /> Confirm reset
+          </CardTitle>
+          <p className="mt-2 text-sm text-slate-500">
+            This will restore all plans to their default values. Enter your password to confirm.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <Label>Password</Label>
+            <div className="relative">
+              <Input type={show ? "text" : "password"} value={pwd}
+                onChange={(e) => setPwd(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && tryConfirm()}
+                autoFocus />
+              <button type="button" onClick={() => setShow(!show)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-slate-500 hover:bg-slate-100">
+                <Eye className="h-4 w-4" />
+              </button>
+            </div>
+            {error && <div className="text-sm text-red-600">{error}</div>}
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={onCancel}>Cancel</Button>
+            <Button variant="destructive" onClick={tryConfirm} disabled={busy || !pwd}>
+              {busy ? "Checking…" : "Reset"}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 /* ---------- Main app ---------- */
 function PaymentDatePlanner() {
   const [plans, setPlans] = useState(initialPlans);
@@ -274,6 +331,7 @@ function PaymentDatePlanner() {
   const [copied, setCopied] = useState(null);
   const [isAdmin, setIsAdmin] = useState(() => sessionStorage.getItem("ppl_admin") === "1");
   const [showLogin, setShowLogin] = useState(false);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [loadingRemote, setLoadingRemote] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState("");
@@ -396,6 +454,7 @@ function PaymentDatePlanner() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-4 md:p-8 text-slate-900">
       {showLogin && <LoginModal onLogin={() => { setIsAdmin(true); setShowLogin(false); }} onCancel={() => setShowLogin(false)} />}
+      {showResetConfirm && <ResetConfirmModal onConfirm={() => { resetAll(); setShowResetConfirm(false); }} onCancel={() => setShowResetConfirm(false)} />}
 
       <div className="mx-auto max-w-7xl space-y-6">
         <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
@@ -418,7 +477,7 @@ function PaymentDatePlanner() {
             {isAdmin ? (
               <>
                 <Button onClick={addPlan} className="gap-2"><Plus className="h-4 w-4" /> Add plan</Button>
-                <Button variant="outline" onClick={resetAll} className="gap-2"><RotateCcw className="h-4 w-4" /> Reset</Button>
+                <Button variant="outline" onClick={() => setShowResetConfirm(true)} className="gap-2"><RotateCcw className="h-4 w-4" /> Reset</Button>
                 <Button onClick={saveAll} disabled={saving || !dirty} className="gap-2 bg-emerald-600 hover:bg-emerald-700">
                   <Save className="h-4 w-4" /> {saving ? "Saving…" : (dirty ? "Save changes" : "Saved")}
                 </Button>
