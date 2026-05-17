@@ -1,0 +1,662 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Payment Date Planner</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+  body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" data-presets="react">
+const { useMemo, useState, useEffect } = React;
+
+/* ============================================================
+   ⚙️  CONFIGURE THESE 3 VALUES BEFORE UPLOADING TO GITHUB
+   ============================================================
+   See setup instructions at the bottom of this file.
+*/
+const CONFIG = {
+  // 1. Your JSONBin bin ID (the part after /b/ in the bin URL)
+  JSONBIN_BIN_ID: "6a093440250b1311c36053dc",
+
+  // 2. Your JSONBin Master Key (X-Master-Key) — used for writes
+  JSONBIN_MASTER_KEY: "$2a$10$YDk68viMoBOgSmSFy1QC8uFbSmYz4R7xTIUfmd/fvTbDL.U73iFK6",
+
+  // 3. SHA-256 hash of your admin password (NOT the password itself)
+  //    To generate: open browser console (F12) and run:
+  //      crypto.subtle.digest("SHA-256", new TextEncoder().encode("samnang@123"))
+  //        .then(b => console.log(Array.from(new Uint8Array(b)).map(x=>x.toString(16).padStart(2,"0")).join("")))
+  //    Or use any online SHA-256 generator and paste the hex string here.
+  PASSWORD_HASH: "8559a487195e081bd9c80ada25744e22b2a7f63f9f0689e374b5e9502bfb3a7c",
+};
+
+/* ============================================================
+   Default plans (used only if your bin is empty / unreachable)
+   ============================================================ */
+const initialPlans = [
+  { id: 1, title: "$1000 plan", principal: 1000, total: 1250, cadence: "monthly", startDate: "2026-04-14", endDate: "2026-08-14", installment: 250, note: "Start from 14th April, pay $250 every month until August to finish." },
+  { id: 2, title: "$1500 plan", principal: 1500, total: 2000, cadence: "daily",   startDate: "2026-04-21", endDate: "2026-06-10", installment: 40,  note: "Pay $40 a day for 50 days, starting from April 21st to June 10th." },
+  { id: 3, title: "$500 plan",  principal: 500,  total: 600,  cadence: "custom",  startDate: "2026-05-15", endDate: "2026-05-30", installment: 300, note: "Pay $300 every half-month (15th and 30th of May)." },
+  { id: 4, title: "$1500 plan", principal: 1500, total: 2250, cadence: "monthly", startDate: "2026-06-02", endDate: "2026-08-02", installment: 250, note: "On the 2nd, pay $250 every month from June until August." },
+  { id: 5, title: "$1500 plan", principal: 1500, total: 2400, cadence: "monthly", startDate: "2026-06-08", endDate: "2026-08-08", installment: 300, note: "On the 8th May, pay $300 every month from June until August." },
+  { id: 6, title: "$500 plan",  principal: 500,  total: 620,  cadence: "custom",  startDate: "2026-05-27", endDate: "2026-06-11", installment: 310, note: "Pay $310 every half-month (27th of May and 11th of June)." },
+  { id: 7, title: "$1000 plan", principal: 1000, total: 1500, cadence: "tenDays", startDate: "2026-05-26", endDate: "2026-06-26", installment: 375, note: "Pay $375 every 10 days starting May 26th." },
+];
+
+/* ---------- Inline icons (lucide replacements) ---------- */
+const Icon = ({ children, className = "h-4 w-4" }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+       stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+       className={className}>{children}</svg>
+);
+const CalendarDays = (p) => <Icon {...p}><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01M16 18h.01"/></Icon>;
+const Copy = (p) => <Icon {...p}><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></Icon>;
+const DollarSign = (p) => <Icon {...p}><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></Icon>;
+const Plus = (p) => <Icon {...p}><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></Icon>;
+const RotateCcw = (p) => <Icon {...p}><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></Icon>;
+const Trash2 = (p) => <Icon {...p}><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/></Icon>;
+const Wallet = (p) => <Icon {...p}><path d="M20 12V8H6a2 2 0 0 1-2-2c0-1.1.9-2 2-2h12v4"/><path d="M4 6v12a2 2 0 0 0 2 2h14v-4"/><path d="M18 12a2 2 0 0 0-2 2c0 1.1.9 2 2 2h4v-4z"/></Icon>;
+const Lock = (p) => <Icon {...p}><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></Icon>;
+const LogOut = (p) => <Icon {...p}><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></Icon>;
+const Save = (p) => <Icon {...p}><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></Icon>;
+const Eye = (p) => <Icon {...p}><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></Icon>;
+
+/* ---------- UI primitives ---------- */
+const cx = (...c) => c.filter(Boolean).join(" ");
+
+const Card = ({ className = "", children }) => (
+  <div className={cx("rounded-2xl border border-slate-200 bg-white", className)}>{children}</div>
+);
+const CardHeader = ({ className = "", children }) => <div className={cx("p-5 pb-2", className)}>{children}</div>;
+const CardTitle = ({ className = "", children }) => <div className={cx("font-semibold leading-none tracking-tight", className)}>{children}</div>;
+const CardContent = ({ className = "", children }) => <div className={cx("p-5 pt-2", className)}>{children}</div>;
+
+const Button = ({ variant = "default", size = "default", className = "", children, ...rest }) => {
+  const base = "inline-flex items-center justify-center rounded-md text-sm font-medium transition focus:outline-none focus:ring-2 focus:ring-slate-400 disabled:opacity-50 disabled:cursor-not-allowed";
+  const sizes = { default: "h-10 px-4 py-2", sm: "h-9 px-3" };
+  const variants = {
+    default: "bg-slate-900 text-white hover:bg-slate-800",
+    outline: "border border-slate-300 bg-white text-slate-900 hover:bg-slate-100",
+    destructive: "bg-red-600 text-white hover:bg-red-700",
+    secondary: "bg-slate-200 text-slate-900 hover:bg-slate-300",
+  };
+  return <button className={cx(base, sizes[size], variants[variant], className)} {...rest}>{children}</button>;
+};
+
+const Input = ({ className = "", ...rest }) => (
+  <input className={cx("flex h-10 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 disabled:bg-slate-50 disabled:text-slate-500", className)} {...rest} />
+);
+const Label = ({ className = "", children }) => <label className={cx("text-sm font-medium text-slate-700", className)}>{children}</label>;
+const Textarea = ({ className = "", ...rest }) => (
+  <textarea className={cx("flex w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 disabled:bg-slate-50 disabled:text-slate-500", className)} {...rest} />
+);
+const Badge = ({ variant = "default", className = "", children }) => {
+  const variants = {
+    default: "bg-slate-900 text-white",
+    secondary: "bg-white text-slate-900",
+    outline: "border border-slate-300 text-slate-700 bg-white",
+  };
+  return <span className={cx("inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium", variants[variant], className)}>{children}</span>;
+};
+
+const Tabs = ({ defaultValue, className = "", children }) => {
+  const [value, setValue] = useState(defaultValue);
+  return (
+    <div className={className}>
+      {React.Children.map(children, (c) => React.cloneElement(c, { __value: value, __setValue: setValue }))}
+    </div>
+  );
+};
+const TabsList = ({ className = "", children, __value, __setValue }) => (
+  <div className={cx("inline-flex items-center justify-center rounded-md bg-slate-100 p-1", className)}>
+    {React.Children.map(children, (c) => React.cloneElement(c, { __value, __setValue }))}
+  </div>
+);
+const TabsTrigger = ({ value, children, __value, __setValue }) => {
+  const active = __value === value;
+  return (
+    <button onClick={() => __setValue(value)}
+      className={cx("inline-flex w-full items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium transition",
+        active ? "bg-white text-slate-900 shadow" : "text-slate-600 hover:text-slate-900")}>
+      {children}
+    </button>
+  );
+};
+const TabsContent = ({ value, className = "", children, __value }) =>
+  __value !== value ? null : <div className={className}>{children}</div>;
+
+/* ---------- Date helpers ---------- */
+function formatDate(dateString) {
+  if (!dateString) return "—";
+  const d = new Date(dateString + "T00:00:00");
+  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(d);
+}
+function addDays(date, days) { const d = new Date(date); d.setDate(d.getDate() + days); return d; }
+function addMonths(date, months) {
+  const d = new Date(date); const day = d.getDate();
+  d.setMonth(d.getMonth() + months);
+  if (d.getDate() < day) d.setDate(0);
+  return d;
+}
+function toDateInputValue(date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+function getSchedule(plan) {
+  const start = new Date(plan.startDate + "T00:00:00");
+  const end = plan.endDate ? new Date(plan.endDate + "T00:00:00") : null;
+  const dates = [];
+  if (plan.cadence === "daily") {
+    let cursor = new Date(start); let g = 0;
+    while ((!end || cursor <= end) && g < 120) { dates.push(new Date(cursor)); cursor = addDays(cursor, 1); g++; }
+  } else if (plan.cadence === "tenDays") {
+    let cursor = new Date(start); let g = 0;
+    while ((!end || cursor <= end) && g < 24) { dates.push(new Date(cursor)); cursor = addDays(cursor, 10); g++; }
+  } else if (plan.cadence === "monthly") {
+    let cursor = new Date(start); let g = 0;
+    while ((!end || cursor <= end) && g < 24) { dates.push(new Date(cursor)); cursor = addMonths(cursor, 1); g++; }
+  } else {
+    dates.push(new Date(start));
+    if (end && end.getTime() !== start.getTime()) dates.push(new Date(end));
+  }
+  return dates;
+}
+
+/* ---------- Auth + remote storage ---------- */
+async function sha256Hex(str) {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function loadFromJsonBin() {
+  if (!CONFIG.JSONBIN_BIN_ID || CONFIG.JSONBIN_BIN_ID.startsWith("PUT_")) return null;
+  try {
+    const res = await fetch(`https://api.jsonbin.io/v3/b/${CONFIG.JSONBIN_BIN_ID}/latest`, {
+      headers: { "X-Master-Key": CONFIG.JSONBIN_MASTER_KEY },
+    });
+    if (!res.ok) throw new Error("Fetch failed: " + res.status);
+    const json = await res.json();
+    const record = json.record;
+    if (Array.isArray(record) && record.length) return record;
+    if (record && Array.isArray(record.plans)) return record.plans;
+    return null;
+  } catch (e) {
+    console.warn("JSONBin load failed:", e);
+    return null;
+  }
+}
+
+async function saveToJsonBin(plans) {
+  if (!CONFIG.JSONBIN_BIN_ID || CONFIG.JSONBIN_BIN_ID.startsWith("PUT_"))
+    throw new Error("JSONBin not configured");
+  const res = await fetch(`https://api.jsonbin.io/v3/b/${CONFIG.JSONBIN_BIN_ID}`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Master-Key": CONFIG.JSONBIN_MASTER_KEY,
+    },
+    body: JSON.stringify({ plans }),
+  });
+  if (!res.ok) throw new Error("Save failed: " + res.status);
+  return res.json();
+}
+
+/* ---------- Login modal ---------- */
+function LoginModal({ onLogin, onCancel }) {
+  const [pwd, setPwd] = useState("");
+  const [show, setShow] = useState(false);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const tryLogin = async () => {
+    if (!pwd) return;
+    setBusy(true); setError("");
+    const h = await sha256Hex(pwd);
+    if (h === CONFIG.PASSWORD_HASH) {
+      sessionStorage.setItem("ppl_admin", "1");
+      onLogin();
+    } else {
+      setError("Incorrect password.");
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
+      <Card className="w-full max-w-sm shadow-xl">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-lg">
+            <Lock className="h-5 w-5" /> Admin login
+          </CardTitle>
+          <p className="mt-2 text-sm text-slate-500">Enter password to edit plans.</p>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <Label>Password</Label>
+            <div className="relative">
+              <Input type={show ? "text" : "password"} value={pwd}
+                onChange={(e) => setPwd(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && tryLogin()}
+                autoFocus />
+              <button type="button" onClick={() => setShow(!show)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-slate-500 hover:bg-slate-100">
+                <Eye className="h-4 w-4" />
+              </button>
+            </div>
+            {error && <div className="text-sm text-red-600">{error}</div>}
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={onCancel}>Cancel</Button>
+            <Button onClick={tryLogin} disabled={busy || !pwd}>
+              {busy ? "Checking…" : "Login"}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+/* ---------- Main app ---------- */
+function PaymentDatePlanner() {
+  const [plans, setPlans] = useState(initialPlans);
+  const [activeId, setActiveId] = useState(initialPlans[0].id);
+  const [copied, setCopied] = useState(null);
+  const [isAdmin, setIsAdmin] = useState(() => sessionStorage.getItem("ppl_admin") === "1");
+  const [showLogin, setShowLogin] = useState(false);
+  const [loadingRemote, setLoadingRemote] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [saveMsg, setSaveMsg] = useState("");
+  const [dirty, setDirty] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      const remote = await loadFromJsonBin();
+      if (remote && remote.length) {
+        setPlans(remote);
+        setActiveId(remote[0].id);
+      }
+      setLoadingRemote(false);
+    })();
+  }, []);
+
+  const activePlan = plans.find((p) => p.id === activeId) ?? plans[0];
+  const activeSchedule = useMemo(() => (activePlan ? getSchedule(activePlan) : []), [activePlan]);
+
+  const dashboard = useMemo(() => {
+    const totalPrincipal = plans.reduce((s, p) => s + Number(p.principal || 0), 0);
+    const totalRevenue = plans.reduce((s, p) => s + Number(p.total || 0), 0);
+    const totalInterest = totalRevenue - totalPrincipal;
+    const today = new Date();
+    const collected = plans.reduce((sum, plan) => {
+      const sched = getSchedule(plan);
+      const paid = sched.filter((d) => d <= today).length;
+      return sum + Math.min(paid * Number(plan.installment || 0), Number(plan.total || 0));
+    }, 0);
+    return { totalPrincipal, totalRevenue, totalInterest, collected, remainingMoney: Math.max(totalRevenue - collected, 0) };
+  }, [plans]);
+
+  const markDirty = () => { setDirty(true); setSaveMsg(""); };
+
+  const updatePlan = (id, patch) => {
+    if (!isAdmin) return;
+    setPlans((prev) => prev.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+    markDirty();
+  };
+
+  const resetAll = () => {
+    if (!isAdmin) return;
+    setPlans(initialPlans);
+    setActiveId(initialPlans[0].id);
+    markDirty();
+  };
+
+  const addPlan = () => {
+    if (!isAdmin) return;
+    const nextId = (plans.length ? Math.max(...plans.map((p) => p.id)) : 0) + 1;
+    const today = new Date();
+    const newPlan = {
+      id: nextId, title: `New plan ${nextId}`, principal: 0, total: 0, cadence: "monthly",
+      startDate: toDateInputValue(today), endDate: toDateInputValue(addMonths(today, 2)),
+      installment: 0, note: "",
+    };
+    setPlans((prev) => [newPlan, ...prev]);
+    setActiveId(nextId);
+    markDirty();
+  };
+
+  const deletePlan = (id) => {
+    if (!isAdmin) return;
+    setPlans((prev) => prev.filter((p) => p.id !== id));
+    if (activeId === id) {
+      const remaining = plans.filter((p) => p.id !== id);
+      setActiveId(remaining[0]?.id ?? 0);
+    }
+    markDirty();
+  };
+
+  const copySchedule = async (plan) => {
+    const sched = getSchedule(plan)
+      .map((d, i) => `${i + 1}. ${formatDate(d.toISOString().slice(0, 10))}`)
+      .join("\n");
+    try {
+      await navigator.clipboard.writeText(`${plan.title}\n${sched}`);
+      setCopied(plan.id);
+      setTimeout(() => setCopied(null), 1500);
+    } catch { setCopied(null); }
+  };
+
+  const saveAll = async () => {
+    setSaving(true); setSaveMsg("");
+    try {
+      await saveToJsonBin(plans);
+      setSaveMsg("✓ Saved to cloud");
+      setDirty(false);
+      setTimeout(() => setSaveMsg(""), 2500);
+    } catch (e) {
+      setSaveMsg("⚠ " + e.message);
+    }
+    setSaving(false);
+  };
+
+  const logout = () => {
+    sessionStorage.removeItem("ppl_admin");
+    setIsAdmin(false);
+  };
+
+  if (loadingRemote) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100 text-slate-600">
+        Loading plans…
+      </div>
+    );
+  }
+
+  if (!activePlan) {
+    return (
+      <div className="min-h-screen p-8">
+        <p className="mb-4">No plans yet.</p>
+        {isAdmin && <Button onClick={resetAll}>Restore defaults</Button>}
+      </div>
+    );
+  }
+
+  const readOnly = !isAdmin;
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-4 md:p-8 text-slate-900">
+      {showLogin && <LoginModal onLogin={() => { setIsAdmin(true); setShowLogin(false); }} onCancel={() => setShowLogin(false)} />}
+
+      <div className="mx-auto max-w-7xl space-y-6">
+        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+          <div>
+            <div className="flex items-center gap-2">
+              <h1 className="text-3xl font-bold tracking-tight">Payment Date Planner</h1>
+              {isAdmin ? (
+                <Badge className="bg-emerald-600 text-white">Admin</Badge>
+              ) : (
+                <Badge variant="outline">View only</Badge>
+              )}
+            </div>
+            <p className="mt-2 max-w-3xl text-sm text-slate-600">
+              {isAdmin
+                ? "You can edit, add, and delete plans. Save your changes to publish them."
+                : "View payment plans and schedules. Login as admin to edit."}
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {isAdmin ? (
+              <>
+                <Button onClick={addPlan} className="gap-2"><Plus className="h-4 w-4" /> Add plan</Button>
+                <Button variant="outline" onClick={resetAll} className="gap-2"><RotateCcw className="h-4 w-4" /> Reset</Button>
+                <Button onClick={saveAll} disabled={saving || !dirty} className="gap-2 bg-emerald-600 hover:bg-emerald-700">
+                  <Save className="h-4 w-4" /> {saving ? "Saving…" : (dirty ? "Save changes" : "Saved")}
+                </Button>
+                <Button variant="outline" onClick={logout} className="gap-2"><LogOut className="h-4 w-4" /> Logout</Button>
+              </>
+            ) : (
+              <Button onClick={() => setShowLogin(true)} className="gap-2"><Lock className="h-4 w-4" /> Admin login</Button>
+            )}
+          </div>
+        </div>
+
+        {saveMsg && (
+          <div className={cx("rounded-xl px-4 py-2 text-sm",
+            saveMsg.startsWith("✓") ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700")}>
+            {saveMsg}
+          </div>
+        )}
+
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+          <Card className="shadow-sm xl:col-span-1">
+            <CardContent className="p-5">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-sm text-slate-500">Total Principal</div>
+                  <div className="mt-2 text-3xl font-bold">${dashboard.totalPrincipal.toLocaleString()}</div>
+                </div>
+                <div className="rounded-2xl bg-slate-100 p-3"><Wallet className="h-6 w-6 text-slate-700" /></div>
+              </div>
+            </CardContent>
+          </Card>
+          <Card className="shadow-sm xl:col-span-1">
+            <CardContent className="p-5">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-sm text-slate-500">Interest Profit</div>
+                  <div className="mt-2 text-3xl font-bold">${dashboard.totalInterest.toLocaleString()}</div>
+                </div>
+                <div className="rounded-2xl bg-emerald-100 p-3"><DollarSign className="h-6 w-6 text-emerald-700" /></div>
+              </div>
+            </CardContent>
+          </Card>
+          <Card className="shadow-sm xl:col-span-1">
+            <CardContent className="p-5">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-sm text-slate-500">Revenue</div>
+                  <div className="mt-2 text-3xl font-bold">${dashboard.totalRevenue.toLocaleString()}</div>
+                </div>
+                <div className="rounded-2xl bg-blue-100 p-3"><DollarSign className="h-6 w-6 text-blue-700" /></div>
+              </div>
+            </CardContent>
+          </Card>
+          <Card className="shadow-sm xl:col-span-1">
+            <CardContent className="p-5">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-sm text-slate-500">Collected</div>
+                  <div className="mt-2 text-3xl font-bold">${dashboard.collected.toLocaleString()}</div>
+                </div>
+                <div className="rounded-2xl bg-violet-100 p-3"><Wallet className="h-6 w-6 text-violet-700" /></div>
+              </div>
+            </CardContent>
+          </Card>
+          <Card className="shadow-sm xl:col-span-1">
+            <CardContent className="p-5">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-sm text-slate-500">Remaining Money</div>
+                  <div className="mt-2 text-3xl font-bold">${dashboard.remainingMoney.toLocaleString()}</div>
+                </div>
+                <div className="rounded-2xl bg-amber-100 p-3"><DollarSign className="h-6 w-6 text-amber-700" /></div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="grid gap-6 lg:grid-cols-[380px_1fr]">
+          <Card className="shadow-sm">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <CalendarDays className="h-5 w-5" /> Plans
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {plans.map((plan) => {
+                const sched = getSchedule(plan);
+                const isActive = activeId === plan.id;
+                return (
+                  <button key={plan.id} onClick={() => setActiveId(plan.id)}
+                    className={cx("w-full rounded-2xl border p-4 text-left transition hover:shadow-sm",
+                      isActive ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white")}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="font-semibold">{plan.title}</div>
+                        <div className={cx("mt-1 text-sm", isActive ? "text-slate-200" : "text-slate-500")}>
+                          {formatDate(plan.startDate)} → {plan.endDate ? formatDate(plan.endDate) : "Open-ended"}
+                        </div>
+                      </div>
+                      <Badge variant={isActive ? "secondary" : "outline"}>{sched.length} dates</Badge>
+                    </div>
+                    <div className={cx("mt-3 text-sm", isActive ? "text-slate-200" : "text-slate-600")}>
+                      Installment: ${plan.installment}
+                    </div>
+                  </button>
+                );
+              })}
+            </CardContent>
+          </Card>
+
+          <Card className="shadow-sm">
+            <CardHeader>
+              <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                <div>
+                  <CardTitle className="text-xl">{activePlan.title}</CardTitle>
+                  <p className="mt-1 text-sm text-slate-500">{activePlan.note}</p>
+                </div>
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" className="gap-2" onClick={() => copySchedule(activePlan)}>
+                    <Copy className="h-4 w-4" /> {copied === activePlan.id ? "Copied" : "Copy schedule"}
+                  </Button>
+                  {isAdmin && (
+                    <Button variant="destructive" size="sm" className="gap-2" onClick={() => deletePlan(activePlan.id)}>
+                      <Trash2 className="h-4 w-4" /> Delete
+                    </Button>
+                  )}
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <Tabs defaultValue={isAdmin ? "edit" : "preview"} className="w-full">
+                <TabsList className="grid w-full grid-cols-2">
+                  <TabsTrigger value="edit">{isAdmin ? "Edit" : "Details"}</TabsTrigger>
+                  <TabsTrigger value="preview">Preview</TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="edit" className="mt-6">
+                  <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                    <div className="space-y-2">
+                      <Label>Title</Label>
+                      <Input disabled={readOnly} value={activePlan.title}
+                        onChange={(e) => updatePlan(activePlan.id, { title: e.target.value })} />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Principal</Label>
+                      <Input disabled={readOnly} type="number" value={activePlan.principal}
+                        onChange={(e) => updatePlan(activePlan.id, { principal: Number(e.target.value) })} />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Total</Label>
+                      <Input disabled={readOnly} type="number" value={activePlan.total}
+                        onChange={(e) => updatePlan(activePlan.id, { total: Number(e.target.value) })} />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Installment</Label>
+                      <Input disabled={readOnly} type="number" value={activePlan.installment}
+                        onChange={(e) => updatePlan(activePlan.id, { installment: Number(e.target.value) })} />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Cadence</Label>
+                      <select disabled={readOnly}
+                        className="h-10 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm disabled:bg-slate-50 disabled:text-slate-500"
+                        value={activePlan.cadence}
+                        onChange={(e) => updatePlan(activePlan.id, { cadence: e.target.value })}>
+                        <option value="monthly">Monthly</option>
+                        <option value="daily">Daily</option>
+                        <option value="tenDays">Every 10 days</option>
+                        <option value="custom">Custom dates</option>
+                      </select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Start date</Label>
+                      <Input disabled={readOnly} type="date" value={activePlan.startDate}
+                        onChange={(e) => updatePlan(activePlan.id, { startDate: e.target.value })} />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>End date</Label>
+                      <Input disabled={readOnly} type="date" value={activePlan.endDate}
+                        onChange={(e) => updatePlan(activePlan.id, { endDate: e.target.value })} />
+                    </div>
+                    <div className="space-y-2 md:col-span-2 xl:col-span-3">
+                      <Label>Note</Label>
+                      <Textarea disabled={readOnly} value={activePlan.note} rows={4}
+                        onChange={(e) => updatePlan(activePlan.id, { note: e.target.value })} />
+                    </div>
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="preview" className="mt-6">
+                  <div className="grid gap-4 xl:grid-cols-[1fr_300px]">
+                    <div className="rounded-2xl border bg-white p-4">
+                      <div className="mb-3 flex items-center justify-between">
+                        <h3 className="font-semibold">Generated schedule</h3>
+                        <Badge variant="outline">{activeSchedule.length} payment dates</Badge>
+                      </div>
+                      <div className="space-y-2">
+                        {activeSchedule.map((date, idx) => (
+                          <div key={idx} className="flex items-center justify-between rounded-xl border px-4 py-3">
+                            <div className="font-medium">Payment {idx + 1}</div>
+                            <div className="text-sm text-slate-600">{formatDate(date.toISOString().slice(0, 10))}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="space-y-4">
+                      <div className="rounded-2xl border bg-slate-50 p-4">
+                        <div className="text-sm text-slate-500">Summary</div>
+                        <div className="mt-2 space-y-2 text-sm">
+                          <div className="flex justify-between gap-4"><span>Principal</span><span className="font-medium">${activePlan.principal}</span></div>
+                          <div className="flex justify-between gap-4"><span>Total</span><span className="font-medium">${activePlan.total}</span></div>
+                          <div className="flex justify-between gap-4"><span>Installment</span><span className="font-medium">${activePlan.installment}</span></div>
+                          <div className="flex justify-between gap-4"><span>Start</span><span className="font-medium">{formatDate(activePlan.startDate)}</span></div>
+                          <div className="flex justify-between gap-4"><span>End</span><span className="font-medium">{activePlan.endDate ? formatDate(activePlan.endDate) : "—"}</span></div>
+                        </div>
+                      </div>
+
+                      <div className="rounded-2xl border bg-white p-4 text-sm text-slate-600">
+                        {isAdmin
+                          ? "Tip: change the start date or cadence and the preview updates instantly. Click 'Save changes' to publish."
+                          : "View-only mode. Login as admin to make changes."}
+                      </div>
+                    </div>
+                  </div>
+                </TabsContent>
+              </Tabs>
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="rounded-2xl border bg-white p-4 text-sm text-slate-500">
+          Built for quick editing of your payment plans and dates.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<PaymentDatePlanner />);
+</script>
+</body>
+</html>
